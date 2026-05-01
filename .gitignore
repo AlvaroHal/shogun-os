@@ -1,6 +1,7 @@
 # Chaves de API e Cookies (NUNCA SUBIR)
 .env
 cookies.txt
+vts_token.txt
 
 # Pastas de ambiente do Python
 __pycache__/
