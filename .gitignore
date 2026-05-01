@@ -1,0 +1,13 @@
+# Chaves de API e Cookies (NUNCA SUBIR)
+.env
+cookies.txt
+
+# Pastas de ambiente do Python
+__pycache__/
+.venv/
+venv/
+
+# Arquivos gerados pela IA e banco de dados local
+Imagens/
+vocal_.mp3
+brain.json
