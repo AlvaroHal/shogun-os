@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import tkinter as tk
+import asyncio
 import os
 import re
 import json
@@ -323,10 +324,12 @@ class AppLauncher:
 # INTERFACE GRÁFICA: O MOTOR SPA
 # ==========================================
 class ArcanaDashboard(ctk.CTk):
-    def __init__(self, nome_ai="IA"):
+    def __init__(self, nome_ai="IA", event_bus=None, loop=None):
         super().__init__()
 
-        # 🔥 CORREÇÃO CRÍTICA: O dicionário deve nascer ANTES de qualquer desenho de tela
+        # 🔥 PONTE DE COMUNICAÇÃO: Agora a tela guarda o loop principal do sistema
+        self.event_bus = event_bus
+        self.loop = loop
         self.bars_refs = {} 
 
         self.title(f"SISTEMA OPERACIONAL SHOGUN 2026 - {nome_ai}")
@@ -337,6 +340,7 @@ class ArcanaDashboard(ctk.CTk):
 
         self.log_history = [] 
         self.launcher = AppLauncher(output_callback=self.add_to_log)
+        self.launcher.load_custom_apps()
 
         # --- CARREGA ESTADOS DO CÉREBRO ---
         try:
@@ -368,12 +372,8 @@ class ArcanaDashboard(ctk.CTk):
         self.content_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
         self.content_frame.grid(row=1, column=0, sticky="nsew")
 
-        # Agora o switch_view chamará o render_aura_panel e encontrará o bars_refs vazio e pronto
         self.switch_view("Modo de Uso")
 
-        # ======================================================
-        # 🔥 MOTOR DE MONITORAMENTO REAL-TIME (INÍCIO DA THREAD)
-        # ======================================================
         import threading
         threading.Thread(target=self.loop_sistema_realtime, daemon=True).start()
 
@@ -670,6 +670,12 @@ class ArcanaDashboard(ctk.CTk):
             self.atualizar_cerebro("modo_operacao_atual", modo) 
             self.add_to_log(f"🔄 Modo alterado para: {modo}")
             
+            if self.event_bus and self.loop:
+                asyncio.run_coroutine_threadsafe(
+                    self.event_bus.publish("modo_alterado", {"modo": modo}),
+                    self.loop
+                )
+            
             self.microfone_aberto = False
             self.atualizar_cerebro("microfone_aberto", False)
             
@@ -699,6 +705,7 @@ class ArcanaDashboard(ctk.CTk):
                 
             self.cards_modo[title] = {'frame': card, 'title': lbl_t}
 
+        # 🔄 RECONSTRUTOR DOS CARDS QUE TINHAM SUMIDO:
         create_card(1, 0, "Chat", "Interação por texto no console.")
         create_card(1, 1, "Contínuo", "Microfone aberto, responde tudo que ouvir.")
         create_card(2, 0, "Press to Talk", "Escuta somente quando você mandar ouvir manualmente.")
@@ -707,6 +714,13 @@ class ArcanaDashboard(ctk.CTk):
         def toggle_visao():
             self.visao_ligada = not self.visao_ligada
             self.atualizar_cerebro("visao_computacional_ativa", self.visao_ligada) 
+            
+            if self.event_bus and self.loop:
+                asyncio.run_coroutine_threadsafe(
+                    self.event_bus.publish("toggle_visao", {"status": "toggle", "active": self.visao_ligada}),
+                    self.loop
+                )
+                
             if self.visao_ligada:
                 self.btn_visao.configure(text="Visão Ligada", fg_color="#1A3B5C", border_color=ACCENT, text_color=ACCENT)
                 self.add_to_log("👁️ Sistema de Visão Computacional ATIVADO.")
@@ -717,6 +731,97 @@ class ArcanaDashboard(ctk.CTk):
         def toggle_ouvir():
             self.microfone_aberto = not self.microfone_aberto
             self.atualizar_cerebro("microfone_aberto", self.microfone_aberto) 
+            
+            if self.event_bus and self.loop:
+                asyncio.run_coroutine_threadsafe(
+                    self.event_bus.publish("toggle_gatilho", {"status": "toggle", "active": self.microfone_aberto}),
+                    self.loop
+                )
+                
+            if self.microfone_aberto:
+                self.btn_ouvir.configure(text="Parar de Ouvir", fg_color="#330011", border_color="#FF3366", text_color="#FF3366")
+                self.lbl_mic_status.configure(text="MIC GRAVANDO", text_color="#FF3366")
+                self.add_to_log("🎙️ Microfone ABERTO. Escutando...")
+            else:
+                self.btn_ouvir.configure(text="Ouvir Agora", fg_color="#071A20", border_color="#004433", text_color="#00FFaa")
+                self.lbl_mic_status.configure(text="MIC PARADO", text_color=TEXT_DIM)
+                self.add_to_log("🔇 Microfone FECHADO.")
+
+        btn_frame = ctk.CTkFrame(modes_panel, fg_color="transparent")
+        btn_frame.grid(row=3, column=0, columnspan=2, sticky="ew", padx=10, pady=(15, 20))
+        btn_frame.grid_columnconfigure(0, weight=1)
+        btn_frame.grid_columnconfigure(1, weight=1)
+        
+        cor_v_bg = "#1A3B5C" if self.visao_ligada else "#0E1520"
+        cor_v_bd = ACCENT if self.visao_ligada else "#16202E"
+        cor_v_tx = ACCENT if self.visao_ligada else TEXT_LIGHT
+        txt_v = "Visão Ligada" if self.visao_ligada else "Visão Desligada"
+        
+        self.btn_visao = ctk.CTkButton(btn_frame, text=txt_v, command=toggle_visao, fg_color=cor_v_bg, hover_color="#204060", border_width=1, border_color=cor_v_bd, text_color=cor_v_tx, height=45, font=ctk.CTkFont(size=13, weight="bold"))
+        self.btn_visao.grid(row=0, column=0, sticky="ew", padx=(0, 5))
+
+        cor_m_bg = "#330011" if self.microfone_aberto else "#071A20"
+        cor_m_bd = "#FF3366" if self.microfone_aberto else "#004433"
+        cor_m_tx = "#FF3366" if self.microfone_aberto else "#00FFaa"
+        txt_m = "Parar de Ouvir" if self.microfone_aberto else "Ouvir Agora"
+
+        self.btn_ouvir = ctk.CTkButton(btn_frame, text=txt_m, command=toggle_ouvir, fg_color=cor_m_bg, hover_color="#440011", border_width=1, border_color=cor_m_bd, text_color=cor_m_tx, height=45, font=ctk.CTkFont(size=13, weight="bold"))
+        self.btn_ouvir.grid(row=0, column=1, sticky="ew", padx=(5, 0))
+
+        self.cards_modo = {}
+
+        def selecionar_modo(modo):
+            self.modo_selecionado = modo
+            self.atualizar_cerebro("modo_operacao_atual", modo) 
+            self.add_to_log(f"🔄 Modo alterado para: {modo}")
+            
+            # Envia o evento de forma segura para o loop assíncrono
+            if self.event_bus and self.loop:
+                asyncio.run_coroutine_threadsafe(
+                    self.event_bus.publish("modo_alterado", {"modo": modo}),
+                    self.loop
+                )
+            
+            self.microfone_aberto = False
+            self.atualizar_cerebro("microfone_aberto", False)
+            
+            for m, elements in self.cards_modo.items():
+                is_active = (m == modo)
+                bg = "#0B1525" if is_active else "#0E1520"
+                border = "#1A3B5C" if is_active else "#16202E"
+                text_col = ACCENT if is_active else TEXT_LIGHT
+                elements['frame'].configure(fg_color=bg, border_color=border)
+                elements['title'].configure(text_color=text_col)
+
+        def toggle_visao():
+            self.visao_ligada = not self.visao_ligada
+            self.atualizar_cerebro("visao_computacional_ativa", self.visao_ligada) 
+            
+            # Envia o comando de visão para o motor assíncrono
+            if self.event_bus and self.loop:
+                asyncio.run_coroutine_threadsafe(
+                    self.event_bus.publish("toggle_visao", {"status": "toggle", "active": self.visao_ligada}),
+                    self.loop
+                )
+                
+            if self.visao_ligada:
+                self.btn_visao.configure(text="Visão Ligada", fg_color="#1A3B5C", border_color=ACCENT, text_color=ACCENT)
+                self.add_to_log("👁️ Sistema de Visão Computacional ATIVADO.")
+            else:
+                self.btn_visao.configure(text="Visão Desligada", fg_color="#0E1520", border_color="#16202E", text_color=TEXT_LIGHT)
+                self.add_to_log("👁️ Sistema de Visão Computacional DESATIVADO.")
+
+        def toggle_ouvir():
+            self.microfone_aberto = not self.microfone_aberto
+            self.atualizar_cerebro("microfone_aberto", self.microfone_aberto) 
+            
+            # Envia o gatilho do microfone de forma segura entre as threads
+            if self.event_bus and self.loop:
+                asyncio.run_coroutine_threadsafe(
+                    self.event_bus.publish("toggle_gatilho", {"status": "toggle", "active": self.microfone_aberto}),
+                    self.loop
+                )
+                
             if self.microfone_aberto:
                 self.btn_ouvir.configure(text="Parar de Ouvir", fg_color="#330011", border_color="#FF3366", text_color="#FF3366")
                 self.lbl_mic_status.configure(text="MIC GRAVANDO", text_color="#FF3366")
@@ -1001,7 +1106,7 @@ class ArcanaDashboard(ctk.CTk):
         f_alvo = ctk.CTkFrame(left_col, fg_color="#1A1F2D", corner_radius=8)
         f_alvo.pack(fill="x", pady=5)
         ctk.CTkLabel(f_alvo, text="FOCO EM USUÁRIO", font=ctk.CTkFont(size=11, weight="bold"), text_color=TEXT_DIM).pack(anchor="w", padx=15, pady=(10, 5))
-        criar_switch(f_alvo, "Responder TODAS as mensagens", var_target_on).pack(anchor="w", padx=15, pady=5)
+        criar_switch(f_alvo, "Responder todas desse usuário", var_target_on).pack(anchor="w", padx=15, pady=5)
         entry_target = ctk.CTkEntry(f_alvo, placeholder_text="Nome (@ ou Nick)", width=200, fg_color="#0B0E14", border_color="#2A3241")
         entry_target.insert(0, target_name)
         entry_target.pack(fill="x", padx=15, pady=(5, 15))
@@ -1073,7 +1178,7 @@ class RemGUI:
     janela = None
 
     @classmethod
-    def iniciar_gui_loop(cls, nome_ai_override=None):
+    def iniciar_gui_loop(cls, nome_ai_override=None, event_bus=None, loop=None):
         if cls.janela is not None: return
         
         try:
@@ -1085,7 +1190,7 @@ class RemGUI:
 
         if nome_ai_override: nome_ai = nome_ai_override
 
-        cls.janela = ArcanaDashboard(nome_ai=nome_ai)
+        cls.janela = ArcanaDashboard(nome_ai=nome_ai, event_bus=event_bus, loop=loop)
         cls.janela.protocol("WM_DELETE_WINDOW", lambda: cls.janela.withdraw())
         cls.janela.mainloop()
 

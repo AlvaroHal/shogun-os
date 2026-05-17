@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 import math
 import ctypes
 import threading
@@ -36,7 +36,7 @@ VTS_TOKEN_FILE = "vts_token.txt"
 
 # Mapeamento: A tag que vem do brain.json -> Nome do atalho (Hotkey) configurado no VTube Studio
 EMOTION_MAP = {
-    "[NORMAL]": "Neutral",
+    "[NORMAL]": ["Neutral", "cancelar", "NORMAL", "Normal"],
     "[RIR]": "Laugh",
     "[RAIVA]": "Angry",
     "[TRISTE]": "Sad",
@@ -59,31 +59,45 @@ class VTSClient:
             print("⏳ [VTS API] Tentando conectar na porta 8001...")
             await self.vts.connect()
             
-            print("🔑 [VTS API] Solicitando autenticação. (Olhe o VTube Studio se for a primeira vez!)")
-            await self.vts.request_authenticate_token()
+            print("🔑 [VTS API] Lendo token de segurança...")
+            await self.vts.read_token()
+            
+            # 🔥 CORREÇÃO: O comando certo é authentic_token
+            if self.vts.authentic_token is None:
+                print("🔔 [VTS API] ATENÇÃO: Vá na tela do VTube Studio e clique em ALLOW / PERMITIR!")
+                await self.vts.request_authenticate_token()
+                await self.vts.write_token()
+            
+            print("🔑 [VTS API] Autenticando...")
             await self.vts.request_authenticate()
             
             self.connected = True
-            print("✅ [VTS API] Conectado e Autenticado com Sucesso!")
+            print("✅ [VTS API] Conectado e Autenticado com Sucesso no VTube Studio!")
             
-            # Puxa a lista de hotkeys (expressões) do modelo atual
             response = await self.vts.request(self.vts.vts_request.requestHotKeyList())
-            self.hotkeys = [hk['name'] for hk in response['data']['availableHotkeys']]
-            print(f"🎭 [VTS API] Expressões encontradas no modelo: {self.hotkeys}")
+            if response and 'data' in response and 'availableHotkeys' in response['data']:
+                self.hotkeys = [hk['name'] for hk in response['data']['availableHotkeys']]
+                print(f"🎭 [VTS API] Expressões encontradas no modelo: {self.hotkeys}")
             
         except Exception as e:
-            print(f"❌ [VTS API] Erro ao conectar: {e}. Verifique se a API está ativada no VTube Studio (Porta 8001).")
+            print(f"❌ [VTS API] Erro crítico ao conectar: {e}")
 
     async def trigger_emotion(self, emotion_tag):
         if not self.connected:
             return
             
-        vts_hotkey_name = EMOTION_MAP.get(emotion_tag)
+        vts_hotkey_names = EMOTION_MAP.get(emotion_tag)
+        if isinstance(vts_hotkey_names, str):
+            vts_hotkey_names = [vts_hotkey_names]
+        elif not vts_hotkey_names:
+            vts_hotkey_names = []
+
+        matched_hotkey = next((name for name in vts_hotkey_names if name in self.hotkeys), None)
         
-        if vts_hotkey_name and vts_hotkey_name in self.hotkeys:
-            request_msg = self.vts.vts_request.requestTriggerHotKey(vts_hotkey_name)
+        if matched_hotkey:
+            request_msg = self.vts.vts_request.requestTriggerHotKey(matched_hotkey)
             await self.vts.request(request_msg)
-            print(f"🎬 [VTS API] Expressão ativada: {vts_hotkey_name}")
+            print(f"🎬 [VTS API] Expressão ativada: {matched_hotkey}")
         else:
             # Tenta ativar pelo nome da tag diretamente caso o usuário não use o nome padrão
             clean_tag = emotion_tag.replace("[", "").replace("]", "")
@@ -92,17 +106,22 @@ class VTSClient:
                 await self.vts.request(request_msg)
                 print(f"🎬 [VTS API] Expressão (Direta) ativada: {clean_tag}")
             else:
-                 print(f"⚠️ [VTS API] Expressão '{vts_hotkey_name}' (ou '{clean_tag}') não encontrada nas Hotkeys do modelo.")
+                 print(f"⚠️ [VTS API] Expressão '{vts_hotkey_names}' não encontrada nas Hotkeys do modelo.")
 
 # Variável global para acessar a API do VTS em outras threads
 vts_controller = VTSClient()
-vts_loop = None # 🔥 CORREÇÃO DA THREAD AQUI
+vts_loop = None 
 
 def start_vts_loop():
-    global vts_loop # 🔥 CORREÇÃO DA THREAD AQUI
+    global vts_loop 
     vts_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(vts_loop)
-    vts_loop.run_until_complete(vts_controller.connect_and_auth())
+    
+    # 🔥 BLINDAGEM ANTI-CRASH: Se der ruim na conexão, não desliga a janela!
+    try:
+        vts_loop.run_until_complete(vts_controller.connect_and_auth())
+    except Exception as e:
+        print(f"⚠️ [VTS LOOP] Aviso: Não foi possível plugar no VTube Studio agora. ({e})")
     
     # Mantém o loop de eventos rodando para processar futuras chamadas de emoção
     async def stay_alive():
@@ -115,7 +134,6 @@ def start_vts_loop():
 threading.Thread(target=start_vts_loop, daemon=True).start()
 # ---------------------------------------------------
 
-
 def find_window():
     result = []
 
@@ -126,7 +144,6 @@ def find_window():
 
     win32gui.EnumWindows(enum, None)
     return result[0] if result else None
-
 
 def capture(hwnd, scale=1.0):
     try:
@@ -189,9 +206,7 @@ def capture(hwnd, scale=1.0):
         return bgr
 
     except Exception as e:
-        print("Erro no capture:", e)
         return None
-
 
 class CaptureWorker(QtCore.QThread):
     frame_ready = QtCore.pyqtSignal(QtGui.QPixmap)
@@ -237,7 +252,7 @@ class CaptureWorker(QtCore.QThread):
                     self.frame_ready.emit(pix)
 
                 except Exception as e:
-                    print("Erro processando frame:", e)
+                    pass
 
             elapsed = time.time() - start_time
             sleep_time = max(0.001, target_delay - elapsed)
@@ -246,7 +261,6 @@ class CaptureWorker(QtCore.QThread):
     def stop(self):
         self.running = False
         self.wait()
-
 
 class Overlay(QtWidgets.QWidget):
     def __init__(self):
@@ -267,11 +281,8 @@ class Overlay(QtWidgets.QWidget):
         w_inicial, h_inicial = 900, 1300
         self.resize(w_inicial, h_inicial)
         
-        # Posicionamento absoluto no eixo X=0 para não ocultar as bordas.
-        # Você usará o deslocamento interno no paintEvent.
         desktop = QtWidgets.QApplication.desktop().availableGeometry()
         self.move(0, desktop.height() - h_inicial)
-        # ---------------------------------------
 
         self.anim = QtCore.QTimer(self)
         self.anim.timeout.connect(self.animate)
@@ -315,14 +326,14 @@ class Overlay(QtWidgets.QWidget):
     def find(self):
         self.hwnd = find_window()
         if self.hwnd:
-            print("Janela encontrada.")
+            print("📺 [OVERLAY] Janela do VTube Studio capturada e travada na tela!")
         else:
-            print("Janela do VTube Studio não encontrada.")
+            print("📺 [OVERLAY] Janela do VTube Studio não encontrada.")
 
     def toggle_lock(self):
         self.locked = not self.locked
         estado = "TRAVADA" if self.locked else "DESTRAVADA"
-        print(f"[SISTEMA] Posição e Tamanho do Modelo: {estado}")
+        print(f"🔒 [SISTEMA] Posição e Tamanho do Modelo: {estado}")
 
     def move_up(self):
         if not self.locked: self.move(self.x(), self.y() - 20)
@@ -369,7 +380,6 @@ class Overlay(QtWidgets.QWidget):
         target_w = int(pix_w * final_scale)
         target_h = int(pix_h * final_scale)
 
-        # 🔥 DESLOCAMENTO INTERNO NA JANELA 🔥
         deslocamento_interno_X = -250
         deslocamento_interno_Y = 15
 
@@ -385,12 +395,11 @@ class Overlay(QtWidgets.QWidget):
         style |= win32con.WS_EX_LAYERED
         if style & win32con.WS_EX_TRANSPARENT:
             style &= ~win32con.WS_EX_TRANSPARENT
-            print("Click-through desligado")
+            print("🖱️ [OVERLAY] Click-through desligado")
         else:
             style |= win32con.WS_EX_TRANSPARENT
-            print("Click-through ligado")
+            print("🖱️ [OVERLAY] Click-through ligado")
         win32gui.SetWindowLong(hwnd, win32con.GWL_EXSTYLE, style)
-
 
 class API(BaseHTTPRequestHandler):
     overlay = None
@@ -401,12 +410,9 @@ class API(BaseHTTPRequestHandler):
         elif self.path == "/speak/stop":
             API.overlay.stop_speaking()
             
-        # 🔥 NOVA ROTA PARA RECEBER EMOÇÕES DO run.py 🔥
         elif self.path.startswith("/emotion/"):
-            emotion_tag = f"[{self.path.split('/')[-1]}]" # Pega ex: /emotion/RAIVA -> [RAIVA]
-            
-            # Executa a função assíncrona de emoção de forma segura
-            global vts_loop # 🔥 CORREÇÃO DA THREAD AQUI
+            emotion_tag = f"[{self.path.split('/')[-1]}]" 
+            global vts_loop
             if vts_controller.connected and vts_loop:
                  asyncio.run_coroutine_threadsafe(
                     vts_controller.trigger_emotion(emotion_tag), 

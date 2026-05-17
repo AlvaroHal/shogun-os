@@ -1,5 +1,6 @@
 torch
 numpy
+customtkinter
 PyAudio
 requests
 edge-tts
@@ -10,10 +11,19 @@ groq
 openai
 python-dotenv
 ddgs
+duckduckgo-search
 psutil
 opencv-python
 pywin32
 websocket-client
 PyQt5
+discord.py==2.7.1
+git+https://github.com/imayhaveborkedit/discord-ext-voice-recv.git
+yt-dlp
+pyautogui
+PyGetWindow
+pynput
+chromadb
+pyvts
 torchaudio
 packaging
